@@ -1,0 +1,373 @@
+SpringBootJavainuseMicroservicesELK
+
+Logs are read by Logstash and they are indexed to Central Elastic Search server/clusters and Kibana provides the UI for the Elastic search results
+
+
+We will be using ELK stack along with Spring Boot Microservice for analyzing the generated logs
+Kibana provides UI for Elastic
+Logstash will collect the logs, transform to JSON messages and fed into Elastic cluster
+
+What is ELK? Need for it?
+The ELK Stack consists of three open-source products - Elasticsearch, Logstash, and Kibana from Elastic.
+All the products are provided by Elastic itself.
+Elasticsearch is a NoSQL database that is based on the Lucene search engine.
+Logstash is a log pipeline tool that accepts inputs from various sources, executes different transformations, and exports the data to various targets. It is a dynamic data collection pipeline with an extensible plugin ecosystem and strong Elasticsearch synergy
+Kibana is a visualization UI layer that works on top of Elasticsearch.
+
+These three projects are used together for log analysis in various environments. So Logstash collects and parses logs, Elastic search indexes and store this information while Kibana provides a UI layer that provide actionable insights.
+
+Use Cases-
+Consider you have a single application running and it produces logs. Now suppose you want analyze the logs generated. One option is to manually analyze them. But suppose these logs are large, then manually analyzing them is not feasible.
+Suppose we have multiple Application running and all these applications produce logs. If we have to analyze the logs manually we will need to go through all the log files. These may run into hundreds.
+
+We can use ELK here to analyze the logs more efficiently and also using more complex search criterias. It provides log aggregation and efficient searching.
+
+Elasticsearch -
+Download the latest version of elasticsearch from Elasticsearch downloads(https://www.elastic.co/downloads/elasticsearch)
+Click on Windows link, goto elastic-search\bin folder
+Run the elasticsearch.bat using the command prompt. Elasticsearch can then be accessed at localhost:9200
+
+Kibana -
+Download the latest version of kibana from Kibana downloads(https://www.elastic.co/downloads/kibana)
+Click on Windows link, goto config folder and modify the kibana.yml
+Modify the kibana.yml to point to the elasticsearch instance. In our case this will be 9200. So uncomment the following line in kibana.yml-
+elasticsearch.url: "http://localhost:9200"
+Goto kibana\bin folder
+Run the kibana.bat using the command prompt. Kibana UI can then be accessed at localhost:5601
+
+Logstash -
+Download the latest version of logstash from Logstash downloads(https://www.elastic.co/downloads/logstash)
+Click on ZIP link
+Create a configuration file named logstash.conf. In further section we will be making the changes for this file and starting logstash.
+
+Lets now come to the spring boot part. We will be creating a simple spring boot application, to generate the logs. 
+Add dependency
+spring-boot-starter-web
+
+Create main class
+
+Create controller ELKController
+@RestController
+class ELKController {
+	private static final Logger LOG = Logger.getLogger(ELKController.class.getName());
+
+	@Autowired
+	RestTemplate restTemplete;
+
+	@Bean
+	RestTemplate restTemplate() {
+		return new RestTemplate();
+	}
+
+	@RequestMapping(value = "/elk")
+	public String helloWorld() {
+		String response = "Welcome to JavaInUse" + new Date();
+		LOG.log(Level.INFO, response);
+
+		return response;
+	}
+
+	@RequestMapping(value = "/exception")
+	public String exception() {
+	//exception, we will throw an exception, and stackTrace we are going to store it in the logs
+		String response = "";
+		try {
+			throw new Exception("Exception has occured....");
+		} catch (Exception e) {
+			e.printStackTrace();
+			LOG.error(e);
+
+			StringWriter sw = new StringWriter();
+			PrintWriter pw = new PrintWriter(sw);
+			e.printStackTrace(pw);
+			String stackTrace = sw.toString();
+			LOG.error("Exception - " + stackTrace);
+			response = stackTrace;
+		}
+
+		return response;
+	}
+}
+
+Logs will contain 2 statements, one Welcome to JavaInUse" + new Date() and Exception
+Logstash pipeline has 3 parts - input,filters,output
+input- we specify from whwre we are going to read the logs, we will be specifying the location of log file given in the properties file, also we will be specifying whether to read the logs line by line or to read it as a block, as we have stacktrace so we will be specifying multi-line properties
+filters- here we modify or filter out what are the log line to be indexed into elastic search, here in our case we are to add an additional tag, which are going to specify this is the stacktrace of the exception
+output- here we specify where we have to index the log file that we have, we are going to index to elastic search
+
+
+In application.properties file
+logging.file=C:/elk/spring-boot-elk.log
+Next we will configure the logstash pipeline- 
+
+Create the logstash.conf in logstash\bin folder
+This is done using the logstash.conf-
+input {
+  file {
+    type => "java"
+    path => "C:/elk/spring-boot-elk.log" // from where the logs are to be read
+    codec => multiline { // specifying the multiline property
+      pattern => "^%{YEAR}-%{MONTHNUM}-%{MONTHDAY} %{TIME}.*"
+      negate => "true"
+      what => "previous"
+    }
+  }
+}
+ 
+filter {
+  #If log line contains tab character followed by 'at' then we will tag that entry as stacktrace
+  if [message] =~ "\tat" { // if the log message contains the word at, then we are adding "stacktrace" to the message
+    grok {
+      match => ["message", "^(\tat)"]
+      add_tag => ["stacktrace"]
+    }
+  }
+ 
+}
+ 
+output {
+   
+  stdout {
+    codec => rubydebug // printing the logs to the console
+  }
+ 
+  # Sending properly parsed log events to elasticsearch
+  elasticsearch { // sending the log events to the elasticsearch
+    hosts => ["localhost:9200"]
+  }
+}
+
+Start logstash using the command prompt as follows-
+Create the logstash.conf in logstash\bin folder
+logstash -f logstash.conf
+
+Start the spring boot application by running the HelloWorldSpringBootApplication as a java application.
+Logs will be generated in C:/elk folder.
+Goto localhost:8080/elk // hit multiple times
+
+Goto localhost:8080/exception // hit multiple times
+
+Go to kibana UI console- localhost and create an index pattern logstash-* to see the indexed data- 
+
+Check what are the index created using localhost:9200/_cat/indices/?v
+an index will be created with logstash-{today's date}
+
+Now we will see what data has been indexed to this index using localhost:9200/logstash-{today's date}/_search
+
+Now we will see how this data can be seen in kibana, need to create an index pattern in kibana
+Goto kibana -> Management -> index Patterns -> Create Index Pattern -> give "logstash-*" in index pattern -> Next Step -> Select @timestamp -> Create Index Pattern -> (Index will be created)
+Goto Discover section -> (now we can see the data)
+
+
+
+Spring Boot Microservices + ELK(Elasticsearch, Logstash, and Kibana) Stack Hello World Example
+
+In this tutorial we will be using ELK stack along with Spring Boot Microservice for analyzing the generated logs.
+The implementation architecture will be as follows- 
+Spring Boot microservice elk stack example
+What is ELK? Need for it?
+The ELK Stack consists of three open-source products - Elasticsearch, Logstash, and Kibana from Elastic.
+Elasticsearch is a NoSQL database that is based on the Lucene search engine.
+Logstash is a log pipeline tool that accepts inputs from various sources, executes different transformations, and exports the data to various targets. It is a dynamic data collection pipeline with an extensible plugin ecosystem and strong Elasticsearch synergy
+Kibana is a visualization UI layer that works on top of Elasticsearch.
+These three projects are used together for log analysis in various environments. So Logstash collects and parses logs, Elastic search indexes and store this information while Kibana provides a UI layer that provide actionable insights.
+Use Cases-
+Consider you have a single application running and it produces logs. Now suppose you want analyze the logs generated. One option is to manually analyze them. But suppose these logs are large, then manually analyzing them is not feasible.
+Suppose we have multiple Application running and all these applications produce logs. If we have to analyze the logs manually we will need to go through all the log files. These may run into hundreds.
+We can use ELK here to analyze the logs more efficiently and also using more complex search criterias. It provides log aggregation and efficient searching.
+Video
+
+This tutorial is explained in the below Youtube Video.
+
+
+Lets Begin
+We will first download the required stack.
+Elasticsearch -
+Download the latest version of elasticsearch from Elasticsearch downloads 
+elasticsearch example
+Run the elasticsearch.bat using the command prompt. Elasticsearch can then be accessed at localhost:9200 
+elastic start example
+Kibana -
+Download the latest version of kibana from Kibana downloads 
+kibana example
+Modify the kibana.yml to point to the elasticsearch instance. In our case this will be 9200. So uncomment the following line in kibana.yml-
+elasticsearch.url: "http://localhost:9200"
+Run the kibana.bat using the command prompt. kibana UI can then be accessed at localhost:5601 
+start kibana
+Logstash -
+Download the latest version of logstash from Logstash downloads 
+logstash example
+Create a configuration file named logstash.conf. In further section we will be making the changes for this file and starting logstash.
+Lets now come to the spring boot part. We will be creating a simple spring boot application, to generate the logs. 
+spring boot elasticsearch example
+Define the pom.xml as follows-
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<groupId>com.javainuse</groupId>
+	<artifactId>spring-boot-elk</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<packaging>jar</packaging>
+
+	<name>spring-boot-elk</name>
+
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>1.5.6.RELEASE</version>
+		<relativePath /> <!-- lookup parent from repository -->
+	</parent>
+
+	<properties>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+		<java.version>1.8</java.version>
+	</properties>
+
+	<dependencies>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+
+
+</project>
+
+Create the Spring Boot Bootstrap class as follows-
+package com.javainuse;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class HelloWorldSpringBootApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(HelloWorldSpringBootApplication.class, args);
+	}
+}
+Next define the controller to expose REST API. We will be making use of these calls to write content to the log file.
+package com.javainuse;
+
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.Date;
+
+import org.apache.log4j.Level;
+import org.apache.log4j.Logger;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.RestTemplate;
+
+@RestController
+class ELKController {
+	private static final Logger LOG = Logger.getLogger(ELKController.class.getName());
+
+	@Autowired
+	RestTemplate restTemplete;
+
+	@Bean
+	RestTemplate restTemplate() {
+		return new RestTemplate();
+	}
+
+	@RequestMapping(value = "/elk")
+	public String helloWorld() {
+		String response = "Welcome to JavaInUse" + new Date();
+		LOG.log(Level.INFO, response);
+
+		return response;
+	}
+
+	@RequestMapping(value = "/exception")
+	public String exception() {
+		String response = "";
+		try {
+			throw new Exception("Exception has occured....");
+		} catch (Exception e) {
+			e.printStackTrace();
+			LOG.error(e);
+
+			StringWriter sw = new StringWriter();
+			PrintWriter pw = new PrintWriter(sw);
+			e.printStackTrace(pw);
+			String stackTrace = sw.toString();
+			LOG.error("Exception - " + stackTrace);
+			response = stackTrace;
+		}
+
+		return response;
+	}
+}
+
+Finally specify the name and location of the log file to be created in the application.properties file.
+logging.file=C:/elk/spring-boot-elk.log
+Next we will configure the logstash pipeline- 
+Logstash Pipeline
+This is done using the logstash.conf-
+input {
+  file {
+    type => "java"
+    path => "C:/elk/spring-boot-elk.log"
+    codec => multiline {
+      pattern => "^%{YEAR}-%{MONTHNUM}-%{MONTHDAY} %{TIME}.*"
+      negate => "true"
+      what => "previous"
+    }
+  }
+}
+ 
+filter {
+  #If log line contains tab character followed by 'at' then we will tag that entry as stacktrace
+  if [message] =~ "\tat" {
+    grok {
+      match => ["message", "^(\tat)"]
+      add_tag => ["stacktrace"]
+    }
+  }
+ 
+}
+ 
+output {
+   
+  stdout {
+    codec => rubydebug
+  }
+ 
+  # Sending properly parsed log events to elasticsearch
+  elasticsearch {
+    hosts => ["localhost:9200"]
+  }
+}
+Start logstash using the command prompt as follows-
+logstash -f logstash.conf
+
+start logstash
+Start the spring boot application by running the HelloWorldSpringBootApplication as a java application.
+Logs will be generated in C:/elk folder.
+goto localhost:8080/elk 
+spring elk
+goto localhost:8080/exception 
+spring exception
+go to kibana UI console- localhost and create an index pattern logstash-* to see the indexed data- 
+kibana index
+
+kibana discover
+Download Source Code
+Download it -
+Spring Boot Microservice+ ELK stack
